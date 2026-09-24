@@ -112,6 +112,11 @@ class ObfuscatedCodeScanner extends BaseScanner
             }
             $code = $this->removeCommentsPreservingLines($source);
             foreach ($patterns as $key => $patternDef) {
+                if ($key === 'backtick_operator') {
+                    $this->checkBacktickOperator($source, $relativePath, $patternDef, $findings);
+
+                    continue;
+                }
                 if (in_array($key, ['long_encoded_string', 'variable_functions', 'chr_chaining'], true)) {
                     foreach (explode("\n", $code) as $index => $line) {
                         $lineNumber = $index + 1;
@@ -141,6 +146,59 @@ class ObfuscatedCodeScanner extends BaseScanner
             }
         } finally {
             fclose($handle);
+        }
+    }
+
+    /**
+     * Check for the backtick (shell execution) operator.
+     *
+     * Matched by token, not regex: PHP emits a bare '`' token only for the
+     * real operator, never for backticks inside strings, heredocs or comments.
+     *
+     * @param  array{pattern: string, severity: Severity, description: string}  $patternDef
+     */
+    private function checkBacktickOperator(
+        string $source,
+        string $relativePath,
+        array $patternDef,
+        FindingCollection $findings,
+    ): void {
+        if (! str_contains($source, '`')) {
+            return;
+        }
+
+        $lineNumber = 1;
+        $insideBackticks = false;
+
+        foreach (token_get_all($source) as $token) {
+            // Array tokens carry their own text; only they can span lines.
+            if (is_array($token)) {
+                $lineNumber += substr_count($token[1], "\n");
+
+                continue;
+            }
+
+            if ($token !== '`') {
+                continue;
+            }
+
+            // Backticks come in pairs. Report the opening one only, so a
+            // single shell-exec expression yields a single finding.
+            if ($insideBackticks) {
+                $insideBackticks = false;
+
+                continue;
+            }
+
+            $insideBackticks = true;
+
+            $findings->add(Finding::make(
+                severity: $patternDef['severity'],
+                file: $relativePath,
+                line: $lineNumber,
+                description: $patternDef['description'],
+                scannerName: $this->name(),
+            ));
         }
     }
 
@@ -357,7 +415,7 @@ class ObfuscatedCodeScanner extends BaseScanner
                 'description' => 'Dynamic assert() with variable argument — can execute arbitrary code.',
             ],
             'backtick_operator' => [
-                'pattern' => '%`[^`]+`%',
+                'pattern' => '',
                 'severity' => Severity::HIGH,
                 'description' => 'Backtick operator detected — executes shell commands (alias of shell_exec).',
             ],
