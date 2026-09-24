@@ -120,6 +120,116 @@ class HtaccessScannerTest extends TestCase
         $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
     }
 
+    public function test_force_https_self_redirect_is_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            "RewriteEngine On\nRewriteCond %{HTTPS} off\nRewriteRule (.*) https://%{HTTP_HOST}/\$1 [R=301,L]",
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_server_name_self_redirect_is_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            'RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [L,R=301]',
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_http_host_header_variable_self_redirect_is_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            'RewriteRule ^(.*)$ https://%{HTTP:Host}/$1 [R=301,L]',
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_external_host_carrying_the_request_host_as_a_parameter_is_still_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            'RewriteRule ^(.*)$ https://attacker.com/?from=%{HTTP_HOST} [R=302,L]',
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('attacker.com', $findings->all()[0]->description);
+    }
+
+    public function test_allowlisted_redirect_host_is_not_flagged(): void
+    {
+        config(['scalpel.htaccess_allowed_redirect_hosts' => ['example.com']]);
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            'RewriteRule ^(.*)$ https://example.com/$1 [R=301,L]',
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_allowlisted_redirect_host_ignores_port_and_case(): void
+    {
+        config(['scalpel.htaccess_allowed_redirect_hosts' => ['Example.COM']]);
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            'RewriteRule ^(.*)$ https://example.com:8443/$1 [R=301,L]',
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_host_outside_the_allowlist_is_still_flagged(): void
+    {
+        config(['scalpel.htaccess_allowed_redirect_hosts' => ['example.com']]);
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            'RewriteRule ^(.*)$ https://not-example.com/$1 [R=301,L]',
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
+    }
+
+    public function test_relative_rewrite_targets_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            "RewriteRule ^ index.php [L]\nRewriteRule ^admin - [F]",
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
     public function test_flags_exec_cgi_options(): void
     {
         file_put_contents($this->tempDir.'/.htaccess', 'Options +ExecCGI');

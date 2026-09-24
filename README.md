@@ -432,6 +432,19 @@ Script handlers and MIME types that are flagged when found in `.htaccess` direct
 ],
 ```
 
+### `htaccess_allowed_redirect_hosts`
+
+Hosts a `RewriteRule` may redirect to without being reported. Matching is exact and case-insensitive, and any port is ignored.
+
+```php
+'htaccess_allowed_redirect_hosts' => [],
+```
+
+> **Self-redirects need no configuration.** Rules targeting `%{HTTP_HOST}`, `%{SERVER_NAME}` or
+> `%{HTTP:Host}` send the visitor back to the host they requested, so the standard force-HTTPS rule
+> `RewriteRule (.*) https://%{HTTP_HOST}/$1 [R=301,L]` is always treated as internal. Only the host
+> portion of the target is inspected, so `https://attacker.com/?from=%{HTTP_HOST}` is still flagged.
+
 ### `baseline_excluded_paths`
 
 Additional paths excluded from baseline snapshots and diff comparisons (on top of `excluded_paths`). These are high-churn paths that change frequently during normal operation.

@@ -48,6 +48,20 @@ class HtaccessScanner extends BaseScanner
         'text/x-perl',
     ];
 
+    /**
+     * Apache server variables that resolve to the host of the current request,
+     * so a RewriteRule using them redirects to the site itself.
+     *
+     * Compared upper-case, so '%{HTTP:Host}' matches too.
+     *
+     * @var string[]
+     */
+    private const SELF_REFERENTIAL_SERVER_VARIABLES = [
+        '%{HTTP_HOST}',
+        '%{SERVER_NAME}',
+        '%{HTTP:HOST}',
+    ];
+
     public function name(): string
     {
         return 'Htaccess';
@@ -265,6 +279,13 @@ class HtaccessScanner extends BaseScanner
 
     /**
      * Check for RewriteRule redirecting unconditionally to external domains.
+     *
+     * The canonical force-HTTPS rule
+     * `RewriteRule (.*) https://%{HTTP_HOST}/$1 [R=301,L]` sends the visitor
+     * back to the host they asked for, so nothing external is involved. Only
+     * the host portion of the substitution is inspected, so a genuinely
+     * external target that merely passes the original host along as a query
+     * parameter is still reported.
      */
     private function checkExternalRewrite(
         string $line,
@@ -272,7 +293,19 @@ class HtaccessScanner extends BaseScanner
         string $relativePath,
         FindingCollection $findings,
     ): void {
-        if (preg_match('/^RewriteRule\s+\S+\s+(https?:\/\/)/i', $line) !== 1) {
+        if (preg_match('/^RewriteRule\s+\S+\s+(\S+)/i', $line, $matches) !== 1) {
+            return;
+        }
+
+        $target = $matches[1];
+
+        if (preg_match('#^https?://#i', $target) !== 1) {
+            return;
+        }
+
+        $host = $this->rewriteTargetHost($target);
+
+        if ($this->isSelfReferentialHost($host) || $this->isAllowedRedirectHost($host)) {
             return;
         }
 
@@ -280,9 +313,68 @@ class HtaccessScanner extends BaseScanner
             severity: Severity::HIGH,
             file: $relativePath,
             line: $lineNumber,
-            description: 'RewriteRule redirects to an external URL — may be used for phishing or traffic hijacking.',
+            description: sprintf(
+                "RewriteRule redirects to external host '%s' — may be used for phishing or traffic hijacking.",
+                $host,
+            ),
             scannerName: $this->name(),
         ));
+    }
+
+    /**
+     * Extract the host portion of a RewriteRule substitution target.
+     */
+    private function rewriteTargetHost(string $target): string
+    {
+        $withoutScheme = (string) preg_replace('#^https?://#i', '', $target);
+
+        // The host ends at the first path, query or fragment delimiter.
+        return substr($withoutScheme, 0, strcspn($withoutScheme, '/?#'));
+    }
+
+    /**
+     * Determine whether the redirect target resolves to the requesting host.
+     */
+    private function isSelfReferentialHost(string $host): bool
+    {
+        $host = strtoupper($host);
+
+        foreach (self::SELF_REFERENTIAL_SERVER_VARIABLES as $variable) {
+            if (str_contains($host, $variable)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine whether the redirect target is an explicitly permitted host.
+     */
+    private function isAllowedRedirectHost(string $host): bool
+    {
+        /** @var string[] $allowedHosts */
+        $allowedHosts = config('scalpel.htaccess_allowed_redirect_hosts', []);
+
+        if ($allowedHosts === []) {
+            return false;
+        }
+
+        $host = strtolower($host);
+
+        // Ignore any port suffix so 'example.com' also matches 'example.com:8443'.
+        $portPosition = strrpos($host, ':');
+        if ($portPosition !== false && ctype_digit(substr($host, $portPosition + 1))) {
+            $host = substr($host, 0, $portPosition);
+        }
+
+        foreach ($allowedHosts as $allowedHost) {
+            if (strtolower(trim($allowedHost)) === $host) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

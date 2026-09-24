@@ -193,6 +193,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Allowed .htaccess Redirect Hosts
+    |--------------------------------------------------------------------------
+    |
+    | Hosts a RewriteRule may redirect to without being reported. Self-referential
+    | redirects (those targeting %{HTTP_HOST}, %{SERVER_NAME} or %{HTTP:Host},
+    | as used by the standard force-HTTPS rule) are always treated as internal
+    | and never need listing here.
+    |
+    | Add the apex domain or CDN host if your app redirects somewhere fixed,
+    | e.g. 'example.com'. Matching is exact and case-insensitive; any port is
+    | ignored.
+    |
+    */
+
+    'htaccess_allowed_redirect_hosts' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Baseline Excluded Paths
     |--------------------------------------------------------------------------
     |
