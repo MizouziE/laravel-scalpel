@@ -362,7 +362,7 @@ class ObfuscatedCodeScanner extends BaseScanner
                 'description' => 'Backtick operator detected — executes shell commands (alias of shell_exec).',
             ],
             'variable_variables' => [
-                'pattern' => '/\$\$[a-zA-Z_]/',
+                'pattern' => '/\$\$(?!__)[a-zA-Z_]/',
                 'severity' => Severity::MEDIUM,
                 'description' => 'Variable variables ($$var) detected — frequently used to obfuscate function calls.',
             ],

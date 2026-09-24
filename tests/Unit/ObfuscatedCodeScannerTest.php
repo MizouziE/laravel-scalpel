@@ -31,6 +31,7 @@ class ObfuscatedCodeScannerTest extends TestCase
                 'chr_chaining' => true,
                 'hex_escape_sequence' => true,
                 'dynamic_include' => true,
+                'variable_variables' => true,
             ],
             'scalpel.long_string_threshold' => 50, // lower for easier testing
         ]);
@@ -299,5 +300,66 @@ class ObfuscatedCodeScannerTest extends TestCase
         $this->assertCount(0, $findings);
 
         @unlink($this->tempDir.'/test.php');
+    }
+
+    public function test_variable_variables_are_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php $$payload($_GET["c"]);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('MEDIUM', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('Variable variables', $findings->all()[0]->description);
+    }
+
+    public function test_compiled_blade_props_are_not_flagged_as_variable_variables(): void
+    {
+        // Verbatim compileProps() output, emitted by every @props component.
+        file_put_contents($this->tempDir.'/compiled.php', <<<'PHP'
+            <?php $attributes ??= new \Illuminate\View\ComponentAttributeBag;
+
+            $__newAttributes = [];
+            $__propNames = \Illuminate\View\ComponentAttributeBag::extractPropNames(['label']);
+
+            foreach ($attributes->all() as $__key => $__value) {
+                if (in_array($__key, $__propNames)) {
+                    $$__key = $$__key ?? $__value;
+                } else {
+                    $__newAttributes[$__key] = $__value;
+                }
+            }
+
+            foreach (array_filter(['label'], 'is_string', ARRAY_FILTER_USE_KEY) as $__key => $__value) {
+                $$__key = $$__key ?? $__value;
+            }
+
+            $__defined_vars = get_defined_vars();
+
+            foreach ($attributes->all() as $__key => $__value) {
+                if (array_key_exists($__key, $__defined_vars)) unset($$__key);
+            }
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_compiled_view_directory_is_still_content_scanned(): void
+    {
+        mkdir($this->tempDir.'/storage/framework/views', 0777, true);
+        file_put_contents(
+            $this->tempDir.'/storage/framework/views/abc123.php',
+            '<?php eval(base64_decode("cGhwaW5mbygpOw=="));',
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
     }
 }

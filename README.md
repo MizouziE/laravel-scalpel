@@ -251,7 +251,7 @@ Detects common PHP obfuscation patterns used in backdoors and webshells. Scans a
 | `assert()` with vars   | Dynamic code execution via assert                   | HIGH     |
 | `extract()` on input   | Variable overwrite from request input               | HIGH     |
 | Variable functions     | `$var()` style dynamic function calls               | MEDIUM   |
-| Variable variables     | `$$var` style indirection to hide calls             | MEDIUM   |
+| Variable variables     | `$$var` indirection, excluding `$$__` internals     | MEDIUM   |
 | `preg_replace` `/e`    | Code execution via deprecated regex modifier        | HIGH     |
 | Long encoded strings   | Suspiciously long base64/hex strings (≥500 chars)   | MEDIUM   |
 
