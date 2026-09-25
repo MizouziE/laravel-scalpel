@@ -248,7 +248,6 @@ Detects common PHP obfuscation patterns used in backdoors and webshells. Scans a
 | `eval($_GET/POST/...)` | eval over raw request input                         | CRITICAL |
 | Backtick operator      | `` `cmd` `` shell execution alias                   | HIGH     |
 | `create_function()`    | Deprecated function commonly abused for injection   | HIGH     |
-| `assert()` with vars   | Dynamic code execution via assert                   | HIGH     |
 | `extract()` on input   | Variable overwrite from request input               | HIGH     |
 | Variable functions     | `$var()` style dynamic function calls               | MEDIUM   |
 | Variable variables     | `$$var` style indirection to hide calls             | MEDIUM   |
@@ -395,7 +394,6 @@ Toggle individual obfuscation detection patterns on or off.
     'eval_str_rot13'      => true,
     'eval_gzuncompress'   => true,
     'eval_gzdecode'       => true,
-    'assert_dynamic'      => true,
     'eval_direct_input'   => true,
     'backtick_operator'   => true,
     'create_function'     => true,
