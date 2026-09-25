@@ -142,7 +142,6 @@ return [
         'eval_str_rot13' => true,
         'eval_gzuncompress' => true,
         'eval_gzdecode' => true,
-        'assert_dynamic' => true,
         'eval_direct_input' => true,
         'backtick_operator' => true,
         'variable_variables' => true,
