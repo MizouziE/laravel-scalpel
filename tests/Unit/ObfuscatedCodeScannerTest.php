@@ -21,7 +21,6 @@ class ObfuscatedCodeScannerTest extends TestCase
                 'eval_str_rot13' => true,
                 'eval_gzuncompress' => true,
                 'eval_gzdecode' => true,
-                'assert_dynamic' => true,
                 'variable_functions' => true,
                 'preg_replace_e' => true,
                 'long_encoded_string' => true,
@@ -93,17 +92,6 @@ class ObfuscatedCodeScannerTest extends TestCase
         $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
     }
 
-    public function test_assert_dynamic(): void
-    {
-        file_put_contents($this->tempDir.'/test.php', '<?php assert($dynamic);');
-
-        $scanner = new ObfuscatedCodeScanner;
-        $findings = $scanner->scan($this->tempDir);
-
-        $this->assertCount(1, $findings);
-        $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
-    }
-
     public function test_variable_functions(): void
     {
         file_put_contents($this->tempDir.'/test.php', '<?php
@@ -154,6 +142,17 @@ class ObfuscatedCodeScannerTest extends TestCase
     public function test_superglobal_eval(): void
     {
         file_put_contents($this->tempDir.'/test.php', '<?php eval($_POST["cmd"]);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+    }
+
+    public function test_superglobal_eval_covers_assert(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php assert($_POST["cmd"]);');
 
         $scanner = new ObfuscatedCodeScanner;
         $findings = $scanner->scan($this->tempDir);
@@ -271,6 +270,16 @@ class ObfuscatedCodeScannerTest extends TestCase
          * Contoh: eval(base64_decode("..."))
          */
         ');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_plain_assert_is_not_flagged(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php assert($user !== null);');
 
         $scanner = new ObfuscatedCodeScanner;
         $findings = $scanner->scan($this->tempDir);
