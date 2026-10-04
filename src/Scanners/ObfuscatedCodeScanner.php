@@ -409,11 +409,6 @@ class ObfuscatedCodeScanner extends BaseScanner
                 'severity' => Severity::CRITICAL,
                 'description' => 'eval(gzdecode(...)) detected — compressed code execution.',
             ],
-            'assert_dynamic' => [
-                'pattern' => '/assert\s*\(\s*(\$|[\'\"]\s*\$)/i',
-                'severity' => Severity::HIGH,
-                'description' => 'Dynamic assert() with variable argument — can execute arbitrary code.',
-            ],
             'backtick_operator' => [
                 'pattern' => '',
                 'severity' => Severity::HIGH,
