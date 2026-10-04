@@ -5,6 +5,25 @@ All notable changes to `laravel-scalpel` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **`public/vendor/` was a full detection blind spot** ([#6](https://github.com/hryagstn/laravel-scalpel/issues/6)). A PHP file dropped there — a web-reachable directory — was reported by neither `StructuralAnomalyScanner` nor `ObfuscatedCodeScanner`:
+  - `public/vendor` has been removed from the default `structural_allowed_directories`. `vendor:publish` only places JS/CSS/images there, so PHP inside it is now flagged as a structural anomaly.
+  - `content_scan_excluded_paths` entries are now matched **from the project root only**. Previously `'vendor'` matched any directory named `vendor` at any depth, which also silently excluded `public/vendor/` (and e.g. `app/vendor/`) from obfuscated-code scanning. Global `excluded_paths` keep matching at any depth.
+- Added `SafeFinder::excludeFromRoot()` for root-anchored exclusions.
+
+### Removed
+- **`assert_dynamic` obfuscation pattern** ([#8](https://github.com/hryagstn/laravel-scalpel/pull/8)). It reported ordinary `assert($x !== null)` / `assert($x instanceof Foo)` calls as HIGH, warning about string evaluation that PHP removed in 8.0 (this package requires PHP ^8.2). No detection is lost: `assert($_GET/$_POST[...])` is still reported as CRITICAL by `superglobal_eval`, and `assert($$var)` as MEDIUM by `variable_variables`.
+
+### Fixed
+- **`backtick_operator` false positives on quoted SQL identifiers** ([#7](https://github.com/hryagstn/laravel-scalpel/pull/7)). The pattern now matches the PHP backtick token instead of a regex, so backticks inside strings, heredocs, comments and inline HTML (e.g. `` `users`.`id` ``, JS template literals) are no longer reported. Real shell-execution backticks are still detected, reported once per expression at the opening line.
+
+### Upgrade notes
+- If you have published `config/scalpel.php`, remove `'public/vendor'` from `structural_allowed_directories`. The content-scan fix applies without any config change.
+- Nested directories that share a name with a `content_scan_excluded_paths` entry (e.g. `packages/foo/vendor`) are now content-scanned. Add their full root-relative path to `content_scan_excluded_paths` if you want to keep skipping them.
+- `assert_dynamic` can be removed from a published `obfuscation_patterns` config. Leaving it in place is harmless; the key is now ignored.
+
 ## [1.9.0] - 2026-09-08
 
 ### Added

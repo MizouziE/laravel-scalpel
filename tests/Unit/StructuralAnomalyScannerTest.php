@@ -16,7 +16,7 @@ class StructuralAnomalyScannerTest extends TestCase
         // Setup mock configurations
         config(['scalpel.non_php_zones' => ['public', 'storage', 'bootstrap/cache']]);
         config(['scalpel.structural_allowed_files' => ['public/index.php']]);
-        config(['scalpel.structural_allowed_directories' => ['public/vendor']]);
+        config(['scalpel.structural_allowed_directories' => ['public/legacy-plugin']]);
         config(['scalpel.excluded_paths' => ['vendor', 'node_modules', '.git']]);
     }
 
@@ -92,13 +92,39 @@ class StructuralAnomalyScannerTest extends TestCase
 
     public function test_respects_allowed_directories(): void
     {
-        @mkdir($this->tempDir.'/public/vendor/package', 0777, true);
-        file_put_contents($this->tempDir.'/public/vendor/package/asset.php', '<?php return [];');
+        @mkdir($this->tempDir.'/public/legacy-plugin/package', 0777, true);
+        file_put_contents($this->tempDir.'/public/legacy-plugin/package/asset.php', '<?php return [];');
 
         $scanner = new StructuralAnomalyScanner;
         $findings = $scanner->scan($this->tempDir);
 
         $this->assertCount(0, $findings);
+    }
+
+    public function test_shipped_config_does_not_allow_public_vendor(): void
+    {
+        /** @var array{structural_allowed_directories: string[]} $shipped */
+        $shipped = require __DIR__.'/../../config/scalpel.php';
+
+        $this->assertNotContains('public/vendor', $shipped['structural_allowed_directories']);
+    }
+
+    public function test_flags_php_files_in_public_vendor_with_shipped_config(): void
+    {
+        /** @var array{structural_allowed_directories: string[]} $shipped */
+        $shipped = require __DIR__.'/../../config/scalpel.php';
+        config(['scalpel.structural_allowed_directories' => $shipped['structural_allowed_directories']]);
+
+        // Published assets (JS/CSS) are fine; a PHP file here is a web shell indicator.
+        @mkdir($this->tempDir.'/public/vendor/horizon', 0777, true);
+        file_put_contents($this->tempDir.'/public/vendor/horizon/app.js', 'console.log(1);');
+        file_put_contents($this->tempDir.'/public/vendor/horizon/shell.php', '<?php eval($_POST["c"]);');
+
+        $scanner = new StructuralAnomalyScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame('public/vendor/horizon/shell.php', $findings->all()[0]->file);
     }
 
     public function test_always_excludes_laravel_framework_directories(): void
