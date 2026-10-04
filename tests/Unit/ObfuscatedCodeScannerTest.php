@@ -6,6 +6,7 @@ namespace Hryagstn\Scalpel\Tests\Unit;
 
 use Hryagstn\Scalpel\Scanners\ObfuscatedCodeScanner;
 use Hryagstn\Scalpel\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class ObfuscatedCodeScannerTest extends TestCase
 {
@@ -159,6 +160,34 @@ class ObfuscatedCodeScannerTest extends TestCase
 
         $this->assertCount(1, $findings);
         $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function superglobalExecutionProvider(): array
+    {
+        // Each function is paired with a different superglobal so both
+        // alternations of the superglobal_eval pattern are exercised.
+        return [
+            'system over $_GET' => ['<?php system($_GET["c"]);'],
+            'exec over $_POST' => ['<?php exec($_POST["c"]);'],
+            'passthru over $_REQUEST' => ['<?php passthru($_REQUEST["c"]);'],
+            'shell_exec over $_COOKIE' => ['<?php shell_exec($_COOKIE["c"]);'],
+        ];
+    }
+
+    #[DataProvider('superglobalExecutionProvider')]
+    public function test_superglobal_eval_covers_shell_functions(string $code): void
+    {
+        file_put_contents($this->tempDir.'/test.php', $code);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('Direct execution of superglobal input', $findings->all()[0]->description);
     }
 
     public function test_chr_chaining(): void
