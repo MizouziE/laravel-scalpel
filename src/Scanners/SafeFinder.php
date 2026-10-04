@@ -35,6 +35,9 @@ final class SafeFinder implements \IteratorAggregate
     private array $excludedPaths = [];
 
     /** @var string[] */
+    private array $rootAnchoredExclusions = [];
+
+    /** @var string[] */
     private array $unreadablePaths = [];
 
     private bool $ignoreDotFiles = true;
@@ -101,6 +104,23 @@ final class SafeFinder implements \IteratorAggregate
     public function notPath(string|array $paths): self
     {
         $this->excludedPaths = array_merge($this->excludedPaths, (array) $paths);
+
+        return $this;
+    }
+
+    /**
+     * Exclude files or directory trees matched from the base path only.
+     *
+     * Unlike exclude(), 'vendor' here skips '<base>/vendor' but NOT
+     * 'public/vendor' or 'app/vendor'. Use this for project-root concepts
+     * (Composer's vendor/, bootstrap/cache) so a same-named directory
+     * elsewhere — especially a web-reachable one — is still traversed.
+     *
+     * @param  string|string[]  $paths
+     */
+    public function excludeFromRoot(string|array $paths): self
+    {
+        $this->rootAnchoredExclusions = array_merge($this->rootAnchoredExclusions, (array) $paths);
 
         return $this;
     }
@@ -199,6 +219,14 @@ final class SafeFinder implements \IteratorAggregate
 
     private function isExcludedPath(string $relativePath): bool
     {
+        foreach ($this->rootAnchoredExclusions as $excluded) {
+            $excluded = trim(str_replace('\\', '/', $excluded), '/');
+
+            if ($excluded !== '' && ($relativePath === $excluded || str_starts_with($relativePath, $excluded.'/'))) {
+                return true;
+            }
+        }
+
         foreach ([$this->excludedDirs, $this->excludedPaths] as $exclusions) {
             foreach ($exclusions as $excluded) {
                 $excluded = trim(str_replace('\\', '/', $excluded), '/');

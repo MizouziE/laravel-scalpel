@@ -68,6 +68,27 @@ class SafeFinderTest extends TestCase
         $this->assertNotContains('nested.php', $basenames);
     }
 
+    public function test_exclude_from_root_only_skips_the_top_level_directory(): void
+    {
+        $basenames = $this->collect(
+            (new SafeFinder)->in($this->tempDir)->files()->excludeFromRoot(['vendor'])->name('*.php'),
+        );
+
+        $this->assertNotContains('top.php', $basenames);
+        $this->assertContains('nested.php', $basenames);
+    }
+
+    public function test_exclude_from_root_supports_multi_segment_paths_and_files(): void
+    {
+        $basenames = $this->collect(
+            (new SafeFinder)->in($this->tempDir)->files()->excludeFromRoot(['app/vendor', '/index.php/'])->name('*.php'),
+        );
+
+        $this->assertNotContains('nested.php', $basenames);
+        $this->assertNotContains('index.php', $basenames);
+        $this->assertContains('top.php', $basenames);
+    }
+
     public function test_dot_files_are_skipped_when_ignore_dot_files_enabled(): void
     {
         $basenames = $this->collect(

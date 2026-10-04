@@ -90,10 +90,20 @@ abstract class BaseScanner implements ScannerInterface
      */
     protected function getContentScanExcludedPaths(): array
     {
+        return array_merge($this->getExcludedPaths(), $this->getContentScanOnlyExcludedPaths());
+    }
+
+    /**
+     * Get the content_scan_excluded_paths config entries on their own.
+     *
+     * @return string[]
+     */
+    protected function getContentScanOnlyExcludedPaths(): array
+    {
         /** @var string[] $paths */
         $paths = config('scalpel.content_scan_excluded_paths', []);
 
-        return array_merge($this->getExcludedPaths(), $paths);
+        return $paths;
     }
 
     /**
@@ -120,11 +130,23 @@ abstract class BaseScanner implements ScannerInterface
      * Cycle-safe and symlink-aware: always follows directory symlinks
      * with cycle detection.
      *
+     * When $excludedPaths is omitted, the global excluded_paths are matched
+     * at any depth (node_modules/.git can legitimately appear anywhere),
+     * while content_scan_excluded_paths are matched from the project root
+     * only. The latter name project-root concepts (Composer's vendor/,
+     * bootstrap/cache), and matching them at any depth would silently hide
+     * web-reachable directories such as public/vendor from content scans.
+     *
      * @param  string[]|null  $excludedPaths
      */
     protected function createFinder(string $basePath, ?array $excludedPaths = null): SafeFinder
     {
-        $excludedPaths ??= $this->getContentScanExcludedPaths();
+        $rootAnchoredPaths = [];
+
+        if ($excludedPaths === null) {
+            $excludedPaths = $this->getExcludedPaths();
+            $rootAnchoredPaths = $this->getContentScanOnlyExcludedPaths();
+        }
 
         $finder = new SafeFinder;
         $finder->in($basePath)
@@ -154,6 +176,10 @@ abstract class BaseScanner implements ScannerInterface
 
         if (! empty($excludedFiles)) {
             $finder->notPath($excludedFiles);
+        }
+
+        if (! empty($rootAnchoredPaths)) {
+            $finder->excludeFromRoot($rootAnchoredPaths);
         }
 
         return $finder;

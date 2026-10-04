@@ -44,13 +44,17 @@ return [
     |--------------------------------------------------------------------------
     |
     | Subdirectories within non-PHP zones where PHP files are expected.
-    | For example, public/vendor/ may contain legitimately published assets.
     | Paths are relative to the project root.
+    |
+    | public/vendor/ is intentionally NOT listed. Assets published there by
+    | `php artisan vendor:publish` are JS/CSS/images, never PHP, and the
+    | directory is directly reachable over HTTP — exactly where an attacker
+    | would drop a web shell. Only add a public/ path here if you have
+    | verified that a package really ships executable PHP into it.
     |
     */
 
     'structural_allowed_directories' => [
-        'public/vendor',
         'storage/framework/views',
         'storage/framework/cache',
     ],
@@ -93,6 +97,11 @@ return [
     | To also scan vendor/ for obfuscated code (slower, recommended after
     | deployments): php artisan scalpel:scan --include-vendor
     | (available via --include-vendor)
+    |
+    | Entries are matched from the project root only: 'vendor' skips the
+    | Composer vendor/ directory but NOT public/vendor/ or app/vendor/,
+    | which are still content-scanned. (excluded_paths above, by contrast,
+    | match a directory name at any depth.)
     |
     */
 

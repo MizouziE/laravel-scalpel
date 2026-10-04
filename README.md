@@ -231,7 +231,8 @@ Attackers commonly drop webshells into public-facing directories disguised as im
 - Scans all configured `non_php_zones` for PHP files
 - Detects lesser-known executable extensions (`.phtml`, `.pht`, `.phar`, `.php5`, ...) that servers are sometimes configured to execute while scanners only look for `.php` — configurable via `suspicious_php_extensions`
 - Detects double-extension upload bypasses (e.g. `shell.php.jpg`)
-- Automatically excludes known legitimate files (`public/index.php`) and directories (`public/vendor/`)
+- Automatically excludes known legitimate files (`public/index.php`) and framework directories (`storage/framework/views`, `storage/framework/cache`)
+- Flags PHP files in `public/vendor/` — published package assets are never PHP, and the directory is web-reachable
 - Configurable allow-lists for both files and directories
 
 ### Obfuscated Code Scanner
@@ -332,15 +333,16 @@ Individual files within non-PHP zones that are known to be legitimate. Relative 
 
 ### `structural_allowed_directories`
 
-Subdirectories within non-PHP zones where PHP files are expected (e.g., published assets).
+Subdirectories within non-PHP zones where PHP files are expected.
 
 ```php
 'structural_allowed_directories' => [
-    'public/vendor',
     'storage/framework/views',
     'storage/framework/cache',
 ],
 ```
+
+> **Note:** `public/vendor` is intentionally not allowed. `vendor:publish` only puts JS/CSS/images there, and the directory is served over HTTP, so a PHP file inside it is a strong web-shell indicator. If you upgraded from ≤ v1.9.0 and published the config, remove `'public/vendor'` from this list.
 
 ### `excluded_paths`
 
@@ -372,6 +374,8 @@ These paths are still monitored by `BaselineDiffScanner` via SHA-256 hash compar
 ```
 
 > To also scan `vendor/` for obfuscated code on demand: `php artisan scalpel:scan --include-vendor`.
+
+Entries are matched **from the project root only**: `vendor` skips Composer's `vendor/` but not `public/vendor/` or `app/vendor/`, which are still content-scanned. (`excluded_paths`, by contrast, matches a directory name at any depth.)
 
 ### `suspicious_php_extensions`
 

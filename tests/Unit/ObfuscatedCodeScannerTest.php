@@ -431,4 +431,40 @@ class ObfuscatedCodeScannerTest extends TestCase
 
         $this->assertCount(0, $findings);
     }
+
+    public function test_content_scan_vendor_exclusion_does_not_hide_public_vendor(): void
+    {
+        config([
+            'scalpel.excluded_paths' => ['node_modules', '.git'],
+            'scalpel.content_scan_excluded_paths' => ['vendor', 'bootstrap/cache'],
+        ]);
+
+        @mkdir($this->tempDir.'/public/vendor/horizon', 0777, true);
+        file_put_contents($this->tempDir.'/public/vendor/horizon/shell.php', '<?php eval($_POST["c"]);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame('public/vendor/horizon/shell.php', $findings->all()[0]->file);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+    }
+
+    public function test_content_scan_vendor_exclusion_still_skips_root_vendor(): void
+    {
+        config([
+            'scalpel.excluded_paths' => ['node_modules', '.git'],
+            'scalpel.content_scan_excluded_paths' => ['vendor', 'bootstrap/cache'],
+        ]);
+
+        @mkdir($this->tempDir.'/vendor/acme/pkg', 0777, true);
+        @mkdir($this->tempDir.'/bootstrap/cache', 0777, true);
+        file_put_contents($this->tempDir.'/vendor/acme/pkg/x.php', '<?php eval($_POST["c"]);');
+        file_put_contents($this->tempDir.'/bootstrap/cache/services.php', '<?php eval($_POST["c"]);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
 }
