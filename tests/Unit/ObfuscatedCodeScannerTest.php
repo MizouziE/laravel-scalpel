@@ -300,4 +300,126 @@ class ObfuscatedCodeScannerTest extends TestCase
 
         @unlink($this->tempDir.'/test.php');
     }
+
+    public function test_backtick_operator_is_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php $output = `whoami`;');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('Backtick operator', $findings->all()[0]->description);
+    }
+
+    public function test_backtick_operator_is_reported_once_per_expression(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php $a = `id`; $b = `uname -a`;');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(2, $findings);
+    }
+
+    public function test_backtick_operator_reports_the_opening_line(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', "<?php\n\n\$out = `ls\n-la`;\n");
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(3, $findings->all()[0]->line);
+    }
+
+    public function test_quoted_sql_identifiers_in_single_quoted_string_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php \$q = orderByField('`product`.`id`', \$ids);",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_quoted_sql_identifiers_in_double_quoted_string_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            '<?php $q = "SELECT `id` FROM `users` WHERE `id` = {$id}";',
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_quoted_sql_identifiers_spanning_multiple_lines_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php\n\$sql = sprintf(\n    'INSERT INTO `%s` (`ident`, `label`)\n     VALUES (?, ?)',\n    \$table,\n);",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_quoted_sql_identifiers_in_heredoc_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php\n\$sql = <<<SQL\nSELECT `id`, `name` FROM `users`\nSQL;\n",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_backticks_in_comments_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php\n// Escape the column as `id` before querying.\n/* also `name` here */\n\$x = 1;",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_backticks_in_inline_html_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php \$x = 1; ?>\n<script>const t = `template \${x} literal`;</script>",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_backtick_operator_can_be_disabled(): void
+    {
+        config(['scalpel.obfuscation_patterns.backtick_operator' => false]);
+        file_put_contents($this->tempDir.'/test.php', '<?php $output = `whoami`;');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
 }
