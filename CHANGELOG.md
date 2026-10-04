@@ -5,7 +5,7 @@ All notable changes to `laravel-scalpel` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.9.1] - 2026-10-04
 
 ### Security
 - **`public/vendor/` was a full detection blind spot** ([#6](https://github.com/hryagstn/laravel-scalpel/issues/6)). A PHP file dropped there — a web-reachable directory — was reported by neither `StructuralAnomalyScanner` nor `ObfuscatedCodeScanner`:
