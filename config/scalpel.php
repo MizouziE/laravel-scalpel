@@ -151,7 +151,6 @@ return [
         'eval_str_rot13' => true,
         'eval_gzuncompress' => true,
         'eval_gzdecode' => true,
-        'eval_direct_input' => true,
         'backtick_operator' => true,
         'variable_variables' => true,
         'extract_input' => true,

@@ -398,7 +398,6 @@ Toggle individual obfuscation detection patterns on or off.
     'eval_str_rot13'      => true,
     'eval_gzuncompress'   => true,
     'eval_gzdecode'       => true,
-    'eval_direct_input'   => true,
     'backtick_operator'   => true,
     'create_function'     => true,
     'variable_variables'  => true,

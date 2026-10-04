@@ -5,6 +5,17 @@ All notable changes to `laravel-scalpel` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+- **`eval_direct_input` config key** ([#11](https://github.com/hryagstn/laravel-scalpel/issues/11)). It was published and documented but never had a pattern implementation, so toggling it had no effect. `eval($_GET/$_POST/...)` is detected (CRITICAL) by `superglobal_eval`.
+
+### Tests
+- Covered the `system`, `exec`, `passthru` and `shell_exec` branches of `superglobal_eval`, across all four superglobals ([#13](https://github.com/hryagstn/laravel-scalpel/issues/13)).
+
+### Upgrade notes
+- `eval_direct_input` can be removed from a published `obfuscation_patterns` config. Leaving it in place is harmless; the key is ignored.
+
 ## [1.9.1] - 2026-10-04
 
 ### Security
