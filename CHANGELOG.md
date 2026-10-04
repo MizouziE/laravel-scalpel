@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - **`eval_direct_input` config key** ([#11](https://github.com/hryagstn/laravel-scalpel/issues/11)). It was published and documented but never had a pattern implementation, so toggling it had no effect. `eval($_GET/$_POST/...)` is detected (CRITICAL) by `superglobal_eval`.
 
+### Fixed
+- **Call-shaped patterns no longer match inside string literals, comments or inline HTML** ([#12](https://github.com/hryagstn/laravel-scalpel/issues/12)). Applies to the `eval_*` family, `create_function`, `dynamic_include`, `superglobal_eval`, `extract_input` and `file_put_contents_encoded`. An exception message or doc string that mentions `eval(base64_decode(...))` is no longer reported. Strings that can become code are still scanned: literals inside an `eval(...)` statement, and literals in a statement that embeds PHP source (`<?php` / `<?=`, e.g. a dropper writing a web shell). Trade-off: a payload string assembled across several statements, none of which contains `<?php`/`<?=` or `eval`, is no longer matched by these patterns (splitting the string already evaded them before). `preg_replace_e`, `hex_escape_sequence`, `long_encoded_string` and `variable_functions` keep reading string contents as before.
+
 ### Tests
 - Covered the `system`, `exec`, `passthru` and `shell_exec` branches of `superglobal_eval`, across all four superglobals ([#13](https://github.com/hryagstn/laravel-scalpel/issues/13)).
 

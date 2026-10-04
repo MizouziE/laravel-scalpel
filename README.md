@@ -257,6 +257,8 @@ Detects common PHP obfuscation patterns used in backdoors and webshells. Scans a
 
 Each pattern can be individually toggled in the configuration.
 
+Call-shaped patterns (`eval(...)` variants, `create_function()`, `extract()`, dynamic `include`, superglobal execution, `file_put_contents()` droppers) ignore comments, inline HTML and text inside string literals, so an error message or doc string that *mentions* `eval(base64_decode(...))` is not reported. String contents are still checked when they can become code: literals inside an `eval(...)` statement, and literals in a statement that embeds PHP source (`<?php` / `<?=`), as a dropper writing a web shell would.
+
 ### Htaccess Scanner
 
 Scans all `.htaccess` files in your project for dangerous directives that could allow execution of non-PHP scripts. Attackers often modify `.htaccess` to register Python, Perl, or CGI handlers, enabling them to run arbitrary scripts through the web server.

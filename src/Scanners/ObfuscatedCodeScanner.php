@@ -24,6 +24,30 @@ class ObfuscatedCodeScanner extends BaseScanner
         'proc_open',
     ];
 
+    /**
+     * Patterns that describe a function-call shape and are matched against
+     * code whose string literals and inline HTML have been blanked, so that
+     * prose mentioning e.g. "eval(base64_decode(...))" is not reported.
+     *
+     * Patterns that must read string contents (preg_replace_e looks for /e
+     * inside a regex string, hex_escape_sequence and long_encoded_string
+     * inspect literal payloads) are intentionally not listed.
+     *
+     * @var string[]
+     */
+    private const CODE_ONLY_PATTERNS = [
+        'eval_base64_decode',
+        'eval_gzinflate',
+        'eval_str_rot13',
+        'eval_gzuncompress',
+        'eval_gzdecode',
+        'create_function',
+        'dynamic_include',
+        'superglobal_eval',
+        'extract_input',
+        'file_put_contents_encoded',
+    ];
+
     public function name(): string
     {
         return 'Obfuscated Code';
@@ -111,6 +135,7 @@ class ObfuscatedCodeScanner extends BaseScanner
                 return;
             }
             $code = $this->removeCommentsPreservingLines($source);
+            $codeWithoutStrings = null;
             foreach ($patterns as $key => $patternDef) {
                 if ($key === 'backtick_operator') {
                     $this->checkBacktickOperator($source, $relativePath, $patternDef, $findings);
@@ -131,16 +156,24 @@ class ObfuscatedCodeScanner extends BaseScanner
 
                     continue;
                 }
-                if (! empty($patternDef['pattern']) && preg_match_all($patternDef['pattern'], $code, $matches, PREG_OFFSET_CAPTURE)) {
-                    foreach ($matches[0] as $match) {
-                        $lineNumber = substr_count(substr($code, 0, $match[1]), "\n") + 1;
-                        $findings->add(Finding::make(
-                            severity: $patternDef['severity'],
-                            file: $relativePath,
-                            line: $lineNumber,
-                            description: $patternDef['description'],
-                            scannerName: $this->name(),
-                        ));
+                if (! empty($patternDef['pattern'])) {
+                    $subject = $code;
+                    if (in_array($key, self::CODE_ONLY_PATTERNS, true)) {
+                        $codeWithoutStrings ??= $this->blankNonExecutableText($source);
+                        $subject = $codeWithoutStrings;
+                    }
+
+                    if (preg_match_all($patternDef['pattern'], $subject, $matches, PREG_OFFSET_CAPTURE)) {
+                        foreach ($matches[0] as $match) {
+                            $lineNumber = substr_count(substr($subject, 0, $match[1]), "\n") + 1;
+                            $findings->add(Finding::make(
+                                severity: $patternDef['severity'],
+                                file: $relativePath,
+                                line: $lineNumber,
+                                description: $patternDef['description'],
+                                scannerName: $this->name(),
+                            ));
+                        }
                     }
                 }
             }
@@ -216,6 +249,71 @@ class ObfuscatedCodeScanner extends BaseScanner
             } else {
                 $result .= is_array($token) ? $token[1] : $token;
             }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Blank comments, inline HTML and string literal contents, preserving
+     * newlines and offsets, so call-shape patterns only match real code.
+     *
+     * String literals are kept verbatim when the statement they belong to
+     * can still turn them into code:
+     *  - the statement contains eval (e.g. eval('eval(base64_decode(...))')), or
+     *  - a literal in the statement embeds PHP source ("<?php" / "<?="),
+     *    which is how droppers write web shells to disk.
+     *
+     * Statements are delimited by ';' and PHP open/close tags.
+     */
+    private function blankNonExecutableText(string $source): string
+    {
+        $tokens = token_get_all($source);
+
+        $stringTokens = [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE];
+        $boundaryTokens = [T_OPEN_TAG, T_OPEN_TAG_WITH_ECHO, T_CLOSE_TAG];
+
+        // First pass: decide per statement whether its literals must be kept.
+        $statementOf = [];
+        $keepStatement = [];
+        $statement = 0;
+
+        foreach ($tokens as $index => $token) {
+            $statementOf[$index] = $statement;
+            $keepStatement[$statement] ??= false;
+
+            if (is_array($token)) {
+                if ($token[0] === T_EVAL) {
+                    $keepStatement[$statement] = true;
+                } elseif (
+                    in_array($token[0], $stringTokens, true)
+                    && (str_contains($token[1], '<?php') || str_contains($token[1], '<?='))
+                ) {
+                    $keepStatement[$statement] = true;
+                }
+
+                if (in_array($token[0], $boundaryTokens, true)) {
+                    $statement++;
+                }
+            } elseif ($token === ';') {
+                $statement++;
+            }
+        }
+
+        // Second pass: rebuild the source with non-executable text blanked.
+        $result = '';
+
+        foreach ($tokens as $index => $token) {
+            if (! is_array($token)) {
+                $result .= $token;
+
+                continue;
+            }
+
+            $blank = in_array($token[0], [T_COMMENT, T_DOC_COMMENT, T_INLINE_HTML], true)
+                || (in_array($token[0], $stringTokens, true) && ! $keepStatement[$statementOf[$index]]);
+
+            $result .= $blank ? (preg_replace('/[^\r\n]/', ' ', $token[1]) ?? '') : $token[1];
         }
 
         return $result;

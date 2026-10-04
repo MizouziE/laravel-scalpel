@@ -496,4 +496,116 @@ class ObfuscatedCodeScannerTest extends TestCase
 
         $this->assertCount(0, $findings);
     }
+
+    /**
+     * Prose that mentions a dangerous call without executing it.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function nonExecutableMentionProvider(): array
+    {
+        return [
+            'eval_base64_decode in double-quoted string' => [<<<'PHP'
+                <?php $doc = "Never use eval(base64_decode(\$x)) in code";
+                PHP],
+            'eval_gzinflate in single-quoted string' => [<<<'PHP'
+                <?php $m = 'eval(gzinflate($p)) is a classic web shell';
+                PHP],
+            'create_function in string' => [<<<'PHP'
+                <?php $msg = 'create_function() was removed in PHP 8';
+                PHP],
+            'dynamic_include in string' => [<<<'PHP'
+                <?php $warn = 'never include $_GET[page] directly';
+                PHP],
+            'superglobal_eval in exception message' => [<<<'PHP'
+                <?php throw new RuntimeException('Blocked system($_GET[cmd]) attempt');
+                PHP],
+            'extract_input in string' => [<<<'PHP'
+                <?php $rule = 'extract($_POST) overwrites variables';
+                PHP],
+            'file_put_contents_encoded in string' => [<<<'PHP'
+                <?php $hint = 'file_put_contents($f, base64_decode($p)) drops a file';
+                PHP],
+            'nowdoc documentation' => [<<<'PHP'
+                <?php
+                $help = <<<'TXT'
+                Avoid eval(base64_decode(...)) and system($_GET[x]).
+                TXT;
+                PHP],
+            'inline HTML' => [<<<'PHP'
+                <?php $x = 1; ?>
+                <p>Do not write eval(base64_decode($x)) in templates.</p>
+                PHP],
+        ];
+    }
+
+    #[DataProvider('nonExecutableMentionProvider')]
+    public function test_call_patterns_ignore_non_executable_text(string $code): void
+    {
+        file_put_contents($this->tempDir.'/test.php', $code);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_dropper_writing_embedded_php_payload_is_still_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php file_put_contents('s.php', '<?php eval(base64_decode("cGhw"));');
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $descriptions = array_map(static fn ($f) => $f->description, $findings->all());
+        $this->assertCount(2, $findings);
+        $this->assertStringContainsString('eval(base64_decode(...))', implode("\n", $descriptions));
+        $this->assertStringContainsString('dropper pattern', implode("\n", $descriptions));
+    }
+
+    public function test_dropper_payload_split_across_literals_in_one_statement_is_still_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php file_put_contents('s.php', "<?php " . 'eval(gzinflate($p));');
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $descriptions = implode("\n", array_map(static fn ($f) => $f->description, $findings->all()));
+        $this->assertStringContainsString('eval(gzinflate(...))', $descriptions);
+    }
+
+    public function test_payload_inside_eval_string_argument_is_still_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php eval('eval(base64_decode("cGhw"));');
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('eval(base64_decode(...))', $findings->all()[0]->description);
+    }
+
+    public function test_line_numbers_survive_blanked_multiline_strings(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php
+            $doc = 'line one
+            eval(base64_decode($x)) in docs';
+
+            eval(base64_decode($p));
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(5, $findings->all()[0]->line);
+    }
 }
