@@ -268,6 +268,7 @@ Detects:
 - `AddType` directives mapping to dangerous MIME types
 - Custom handler registrations for `cgi-script`, `python-program`, `perl-script`, etc.
 - Dangerous PHP directives: `allow_url_include`, `auto_prepend_file`, `auto_append_file`, emptied `disable_functions`, and more
+- `RewriteRule` redirects to an external host — self-redirects via `%{HTTP_HOST}`/`%{SERVER_NAME}` are not flagged, and fixed destinations of your own can be allowed via `htaccess_allowed_redirect_hosts`
 
 ### UserIni Scanner
 
@@ -443,10 +444,7 @@ Hosts a `RewriteRule` may redirect to without being reported. Matching is exact 
 'htaccess_allowed_redirect_hosts' => [],
 ```
 
-> **Self-redirects need no configuration.** Rules targeting `%{HTTP_HOST}`, `%{SERVER_NAME}` or
-> `%{HTTP:Host}` send the visitor back to the host they requested, so the standard force-HTTPS rule
-> `RewriteRule (.*) https://%{HTTP_HOST}/$1 [R=301,L]` is always treated as internal. Only the host
-> portion of the target is inspected, so `https://attacker.com/?from=%{HTTP_HOST}` is still flagged.
+> **Note:** self-redirects need no configuration. A target whose host is `%{HTTP_HOST}`, `%{SERVER_NAME}` or `%{HTTP:Host}` (optionally with a port, and followed by `%{REQUEST_URI}`) sends the visitor back to the host they requested, so the standard force-HTTPS rule `RewriteRule (.*) https://%{HTTP_HOST}/$1 [R=301,L]` is always treated as internal. The variable has to be the whole host: `https://%{HTTP_HOST}.evil.com/`, `https://%{HTTP_HOST}@evil.com/` and `https://attacker.com/?from=%{HTTP_HOST}` are all still flagged.
 
 ### `baseline_excluded_paths`
 
