@@ -6,6 +6,7 @@ namespace Hryagstn\Scalpel\Tests\Unit;
 
 use Hryagstn\Scalpel\Scanners\ObfuscatedCodeScanner;
 use Hryagstn\Scalpel\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class ObfuscatedCodeScannerTest extends TestCase
 {
@@ -21,7 +22,6 @@ class ObfuscatedCodeScannerTest extends TestCase
                 'eval_str_rot13' => true,
                 'eval_gzuncompress' => true,
                 'eval_gzdecode' => true,
-                'assert_dynamic' => true,
                 'variable_functions' => true,
                 'preg_replace_e' => true,
                 'long_encoded_string' => true,
@@ -93,17 +93,6 @@ class ObfuscatedCodeScannerTest extends TestCase
         $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
     }
 
-    public function test_assert_dynamic(): void
-    {
-        file_put_contents($this->tempDir.'/test.php', '<?php assert($dynamic);');
-
-        $scanner = new ObfuscatedCodeScanner;
-        $findings = $scanner->scan($this->tempDir);
-
-        $this->assertCount(1, $findings);
-        $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
-    }
-
     public function test_variable_functions(): void
     {
         file_put_contents($this->tempDir.'/test.php', '<?php
@@ -160,6 +149,45 @@ class ObfuscatedCodeScannerTest extends TestCase
 
         $this->assertCount(1, $findings);
         $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+    }
+
+    public function test_superglobal_eval_covers_assert(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php assert($_POST["cmd"]);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function superglobalExecutionProvider(): array
+    {
+        // Each function is paired with a different superglobal so both
+        // alternations of the superglobal_eval pattern are exercised.
+        return [
+            'system over $_GET' => ['<?php system($_GET["c"]);'],
+            'exec over $_POST' => ['<?php exec($_POST["c"]);'],
+            'passthru over $_REQUEST' => ['<?php passthru($_REQUEST["c"]);'],
+            'shell_exec over $_COOKIE' => ['<?php shell_exec($_COOKIE["c"]);'],
+        ];
+    }
+
+    #[DataProvider('superglobalExecutionProvider')]
+    public function test_superglobal_eval_covers_shell_functions(string $code): void
+    {
+        file_put_contents($this->tempDir.'/test.php', $code);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('Direct execution of superglobal input', $findings->all()[0]->description);
     }
 
     public function test_chr_chaining(): void
@@ -278,6 +306,16 @@ class ObfuscatedCodeScannerTest extends TestCase
         $this->assertCount(0, $findings);
     }
 
+    public function test_plain_assert_is_not_flagged(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php assert($user !== null);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
     public function test_disabled_patterns_are_skipped(): void
     {
         config(['scalpel.obfuscation_patterns.eval_base64_decode' => false]);
@@ -299,5 +337,275 @@ class ObfuscatedCodeScannerTest extends TestCase
         $this->assertCount(0, $findings);
 
         @unlink($this->tempDir.'/test.php');
+    }
+
+    public function test_backtick_operator_is_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php $output = `whoami`;');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('Backtick operator', $findings->all()[0]->description);
+    }
+
+    public function test_backtick_operator_is_reported_once_per_expression(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', '<?php $a = `id`; $b = `uname -a`;');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(2, $findings);
+    }
+
+    public function test_backtick_operator_reports_the_opening_line(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', "<?php\n\n\$out = `ls\n-la`;\n");
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(3, $findings->all()[0]->line);
+    }
+
+    public function test_quoted_sql_identifiers_in_single_quoted_string_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php \$q = orderByField('`product`.`id`', \$ids);",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_quoted_sql_identifiers_in_double_quoted_string_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            '<?php $q = "SELECT `id` FROM `users` WHERE `id` = {$id}";',
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_quoted_sql_identifiers_spanning_multiple_lines_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php\n\$sql = sprintf(\n    'INSERT INTO `%s` (`ident`, `label`)\n     VALUES (?, ?)',\n    \$table,\n);",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_quoted_sql_identifiers_in_heredoc_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php\n\$sql = <<<SQL\nSELECT `id`, `name` FROM `users`\nSQL;\n",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_backticks_in_comments_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php\n// Escape the column as `id` before querying.\n/* also `name` here */\n\$x = 1;",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_backticks_in_inline_html_are_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/test.php',
+            "<?php \$x = 1; ?>\n<script>const t = `template \${x} literal`;</script>",
+        );
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_backtick_operator_can_be_disabled(): void
+    {
+        config(['scalpel.obfuscation_patterns.backtick_operator' => false]);
+        file_put_contents($this->tempDir.'/test.php', '<?php $output = `whoami`;');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_content_scan_vendor_exclusion_does_not_hide_public_vendor(): void
+    {
+        config([
+            'scalpel.excluded_paths' => ['node_modules', '.git'],
+            'scalpel.content_scan_excluded_paths' => ['vendor', 'bootstrap/cache'],
+        ]);
+
+        @mkdir($this->tempDir.'/public/vendor/horizon', 0777, true);
+        file_put_contents($this->tempDir.'/public/vendor/horizon/shell.php', '<?php eval($_POST["c"]);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame('public/vendor/horizon/shell.php', $findings->all()[0]->file);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+    }
+
+    public function test_content_scan_vendor_exclusion_still_skips_root_vendor(): void
+    {
+        config([
+            'scalpel.excluded_paths' => ['node_modules', '.git'],
+            'scalpel.content_scan_excluded_paths' => ['vendor', 'bootstrap/cache'],
+        ]);
+
+        @mkdir($this->tempDir.'/vendor/acme/pkg', 0777, true);
+        @mkdir($this->tempDir.'/bootstrap/cache', 0777, true);
+        file_put_contents($this->tempDir.'/vendor/acme/pkg/x.php', '<?php eval($_POST["c"]);');
+        file_put_contents($this->tempDir.'/bootstrap/cache/services.php', '<?php eval($_POST["c"]);');
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    /**
+     * Prose that mentions a dangerous call without executing it.
+     *
+     * @return array<string, array{string}>
+     */
+    public static function nonExecutableMentionProvider(): array
+    {
+        return [
+            'eval_base64_decode in double-quoted string' => [<<<'PHP'
+                <?php $doc = "Never use eval(base64_decode(\$x)) in code";
+                PHP],
+            'eval_gzinflate in single-quoted string' => [<<<'PHP'
+                <?php $m = 'eval(gzinflate($p)) is a classic web shell';
+                PHP],
+            'create_function in string' => [<<<'PHP'
+                <?php $msg = 'create_function() was removed in PHP 8';
+                PHP],
+            'dynamic_include in string' => [<<<'PHP'
+                <?php $warn = 'never include $_GET[page] directly';
+                PHP],
+            'superglobal_eval in exception message' => [<<<'PHP'
+                <?php throw new RuntimeException('Blocked system($_GET[cmd]) attempt');
+                PHP],
+            'extract_input in string' => [<<<'PHP'
+                <?php $rule = 'extract($_POST) overwrites variables';
+                PHP],
+            'file_put_contents_encoded in string' => [<<<'PHP'
+                <?php $hint = 'file_put_contents($f, base64_decode($p)) drops a file';
+                PHP],
+            'nowdoc documentation' => [<<<'PHP'
+                <?php
+                $help = <<<'TXT'
+                Avoid eval(base64_decode(...)) and system($_GET[x]).
+                TXT;
+                PHP],
+            'inline HTML' => [<<<'PHP'
+                <?php $x = 1; ?>
+                <p>Do not write eval(base64_decode($x)) in templates.</p>
+                PHP],
+        ];
+    }
+
+    #[DataProvider('nonExecutableMentionProvider')]
+    public function test_call_patterns_ignore_non_executable_text(string $code): void
+    {
+        file_put_contents($this->tempDir.'/test.php', $code);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_dropper_writing_embedded_php_payload_is_still_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php file_put_contents('s.php', '<?php eval(base64_decode("cGhw"));');
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $descriptions = array_map(static fn ($f) => $f->description, $findings->all());
+        $this->assertCount(2, $findings);
+        $this->assertStringContainsString('eval(base64_decode(...))', implode("\n", $descriptions));
+        $this->assertStringContainsString('dropper pattern', implode("\n", $descriptions));
+    }
+
+    public function test_dropper_payload_split_across_literals_in_one_statement_is_still_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php file_put_contents('s.php', "<?php " . 'eval(gzinflate($p));');
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $descriptions = implode("\n", array_map(static fn ($f) => $f->description, $findings->all()));
+        $this->assertStringContainsString('eval(gzinflate(...))', $descriptions);
+    }
+
+    public function test_payload_inside_eval_string_argument_is_still_detected(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php eval('eval(base64_decode("cGhw"));');
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertEquals('CRITICAL', $findings->all()[0]->severity->value);
+        $this->assertStringContainsString('eval(base64_decode(...))', $findings->all()[0]->description);
+    }
+
+    public function test_line_numbers_survive_blanked_multiline_strings(): void
+    {
+        file_put_contents($this->tempDir.'/test.php', <<<'PHP'
+            <?php
+            $doc = 'line one
+            eval(base64_decode($x)) in docs';
+
+            eval(base64_decode($p));
+            PHP);
+
+        $scanner = new ObfuscatedCodeScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(1, $findings);
+        $this->assertSame(5, $findings->all()[0]->line);
     }
 }
