@@ -49,18 +49,10 @@ class HtaccessScanner extends BaseScanner
     ];
 
     /**
-     * Apache server variables that resolve to the host of the current request,
-     * so a RewriteRule using them redirects to the site itself.
-     *
-     * Compared upper-case, so '%{HTTP:Host}' matches too.
-     *
-     * @var string[]
+     * Redirect targets whose host is built entirely from the request's own host.
      */
-    private const SELF_REFERENTIAL_SERVER_VARIABLES = [
-        '%{HTTP_HOST}',
-        '%{SERVER_NAME}',
-        '%{HTTP:HOST}',
-    ];
+    private const SELF_REFERENTIAL_HOST_PATTERN =
+        '/^%\{(?:HTTP_HOST|SERVER_NAME|HTTP:Host)\}(?::(?:\d+|%\{SERVER_PORT\}))?(?:%\{REQUEST_URI\})?$/i';
 
     public function name(): string
     {
@@ -280,12 +272,8 @@ class HtaccessScanner extends BaseScanner
     /**
      * Check for RewriteRule redirecting unconditionally to external domains.
      *
-     * The canonical force-HTTPS rule
-     * `RewriteRule (.*) https://%{HTTP_HOST}/$1 [R=301,L]` sends the visitor
-     * back to the host they asked for, so nothing external is involved. Only
-     * the host portion of the substitution is inspected, so a genuinely
-     * external target that merely passes the original host along as a query
-     * parameter is still reported.
+     * Only the host portion is inspected, so the standard force-HTTPS rule is
+     * internal while a literal host carrying %{HTTP_HOST} along is not.
      */
     private function checkExternalRewrite(
         string $line,
@@ -313,10 +301,7 @@ class HtaccessScanner extends BaseScanner
             severity: Severity::HIGH,
             file: $relativePath,
             line: $lineNumber,
-            description: sprintf(
-                "RewriteRule redirects to external host '%s' — may be used for phishing or traffic hijacking.",
-                $host,
-            ),
+            description: "RewriteRule redirects to external host '{$host}' — may be used for phishing or traffic hijacking.",
             scannerName: $this->name(),
         ));
     }
@@ -327,9 +312,12 @@ class HtaccessScanner extends BaseScanner
     private function rewriteTargetHost(string $target): string
     {
         $withoutScheme = (string) preg_replace('#^https?://#i', '', $target);
+        $authority = substr($withoutScheme, 0, strcspn($withoutScheme, '/?#'));
 
-        // The host ends at the first path, query or fragment delimiter.
-        return substr($withoutScheme, 0, strcspn($withoutScheme, '/?#'));
+        // Anything before the last '@' is userinfo, not the host the browser goes to.
+        $userInfoEnd = strrpos($authority, '@');
+
+        return $userInfoEnd === false ? $authority : substr($authority, $userInfoEnd + 1);
     }
 
     /**
@@ -337,15 +325,7 @@ class HtaccessScanner extends BaseScanner
      */
     private function isSelfReferentialHost(string $host): bool
     {
-        $host = strtoupper($host);
-
-        foreach (self::SELF_REFERENTIAL_SERVER_VARIABLES as $variable) {
-            if (str_contains($host, $variable)) {
-                return true;
-            }
-        }
-
-        return false;
+        return preg_match(self::SELF_REFERENTIAL_HOST_PATTERN, $host) === 1;
     }
 
     /**
