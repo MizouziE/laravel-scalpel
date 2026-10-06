@@ -171,7 +171,7 @@ class HtaccessScannerTest extends TestCase
 
         $this->assertCount(1, $findings);
         $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
-        $this->assertStringContainsString('attacker.com', $findings->all()[0]->description);
+        $this->assertStringContainsString("host 'attacker.com'", $findings->all()[0]->description);
     }
 
     public function test_external_host_prefixed_with_the_request_host_is_still_flagged(): void
@@ -186,7 +186,7 @@ class HtaccessScannerTest extends TestCase
 
         $this->assertCount(1, $findings);
         $this->assertEquals('HIGH', $findings->all()[0]->severity->value);
-        $this->assertStringContainsString('%{HTTP_HOST}.evil.com', $findings->all()[0]->description);
+        $this->assertStringContainsString("host '%{HTTP_HOST}.evil.com'", $findings->all()[0]->description);
     }
 
     public function test_external_host_hidden_behind_userinfo_is_still_flagged(): void
@@ -208,7 +208,20 @@ class HtaccessScannerTest extends TestCase
     {
         file_put_contents(
             $this->tempDir.'/.htaccess',
-            "RewriteRule ^(.*)$ https://%{HTTP_HOST}:8443/\$1 [R=301,L]\nRewriteRule ^ https://%{HTTP_HOST}:%{SERVER_PORT}%{REQUEST_URI} [R=301,L]",
+            'RewriteRule ^(.*)$ https://%{HTTP_HOST}:8443/$1 [R=301,L]',
+        );
+
+        $scanner = new HtaccessScanner;
+        $findings = $scanner->scan($this->tempDir);
+
+        $this->assertCount(0, $findings);
+    }
+
+    public function test_self_redirect_with_the_server_port_variable_is_not_flagged(): void
+    {
+        file_put_contents(
+            $this->tempDir.'/.htaccess',
+            'RewriteRule ^ https://%{HTTP_HOST}:%{SERVER_PORT}%{REQUEST_URI} [R=301,L]',
         );
 
         $scanner = new HtaccessScanner;
